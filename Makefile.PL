@@ -18,8 +18,10 @@ WriteMakefile(
         'Test::More' => 0,
     },
     PREREQ_PM => {
-        #'ABC'              => 1.6,
-        #'Foo::Bar::Module' => 5.0401,
+        'DateTime' => 0,
+        'DateTime::Format::Flexible' => 0,
+        'SOAP::Lite' => 0,
+        'HTTP::Cookies' => 0,
     },
     dist  => { COMPRESS => 'gzip -9f', SUFFIX => 'gz', },
     clean => { FILES => 'Birst-API-*' },
