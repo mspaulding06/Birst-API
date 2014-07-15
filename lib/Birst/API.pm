@@ -122,6 +122,8 @@ sub set_space_by_name {
 
 sub get_space_id_by_name {
     my ($self, $space_name) = @_;
+    # escape parens in space name
+    $space_name =~ s/(\(|\))/\\$1/g;
     my $spaces = $self->spaces;
     die "Unable to receive list of spaces" unless $spaces;
     my @ids = map { $_->{id} } grep { $_->{name} =~ /$space_name/ } @$spaces;
