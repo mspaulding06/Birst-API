@@ -71,10 +71,13 @@ use IO::Compress::Zip qw(zip $ZipError);
 use File::Temp qw(:seekable);
 use MIME::Base64 qw(encode_base64);
 use Path::Tiny;
+use DateTime;
+use DateTime::Format::Flexible;
 
 our $VERSION = '0.01';
 
 my $ns = 'http://www.birst.com/';
+my $xsd_datetime_format = '%Y-%m-%dT%H:%M:%S';
 
 my %wsdl = (
         rc => 'https://rc.birst.com/CommandWebService.asmx?WSDL',
@@ -102,6 +105,7 @@ sub new {
         query_result => undef,
         query_token => 0,
         upload_token => 0,
+        publish_token => 0,
         parse_datetime => 1,
     }, $class;
 }
@@ -288,6 +292,54 @@ sub upload_status {
     }
     $som = $self->_call('getDataUploadStatus',
                 SOAP::Data->name('dataUploadToken')->value($upload_token),
+            );
+    $som->result || 1;
+}
+
+sub process_data {
+    my $self = shift;
+    my $space_id = $self->{space_id} || die "No space id set.";
+    my %opts = @_;
+    
+    my $date;
+    if (exists $opts{date}) {
+        $date = DateTime::Format::Flexible->parse_datetime($opts{date})->strftime($xsd_datetime_format);
+    }
+    else {
+        $date = DateTime->now->strftime($xsd_datetime_format);
+    }
+    
+    my @subgroups = ();
+    if (exists $opts{subgroups}) {
+        if (ref $opts{subgroups} eq 'ARRAY') {
+            @subgroups = map { SOAP::Data->name('string')->value($_) } @{$opts{subgroups}};
+        }
+        else {
+            @subgroups = (SOAP::Data->name('string')->value($opts{subgroups}));
+        }
+    }
+    
+    my $som = $self->_call('publishData',
+                 SOAP::Data->name('spaceID')->value($space_id),
+                 SOAP::Data->name('subgroups')->value(\@subgroups),
+                 SOAP::Data->name('date')->value($date),
+            );
+    $self->{publish_token} = $som->valueof('//publishDataResponse/publishDataResult');
+}
+
+sub process_data_status {
+    my $self = shift;
+    my $publish_token = $self->{publish_token} || die "No publishing token.";
+    
+    my $som = $self->_call('isPublishingComplete',
+                 SOAP::Data->name('publishingToken')->value($publish_token),
+            );
+    my $result = $som->valueof('//isPublishingCompleteResponse/isPublishingCompleteResult');
+    if ($result eq 'false') {
+        return 0;
+    }
+    $som = $self->_call('getPublishingStatus',
+                SOAP::Data->name('publishingToken')->value($publish_token),
             );
     $som->result || 1;
 }
