@@ -100,12 +100,13 @@ sub new {
     SOAP::Lite->import(+trace => 'all') if defined $opts{debug} and $opts{debug} == 1;
 
     bless {
-        client => $client,
-        token => 0,
-        query_result => undef,
-        query_token => 0,
-        upload_token => 0,
-        publish_token => 0,
+        client         => $client,
+        token          => 0,
+        query_result   => undef,
+        query_token    => 0,
+        upload_token   => 0,
+        publish_token  => 0,
+        job_token      => 0,
         parse_datetime => 1,
     }, $class;
 }
@@ -434,6 +435,40 @@ sub set_engine_version {
                 SOAP::Data->name('spaceID')->value($space_id),
                 SOAP::Data->name('processingVersionName')->value($version),
             );
+}
+
+sub delete_all_data {
+    my $self = shift;
+    my $space_id = $self->{space_id} || die "No space id.";
+    my $som = $self->_call('deleteAllDataFromSpace',
+                 SOAP::Data->name('spaceID')->value($space_id),
+            );
+    $self->{job_token} = $som->valueof('//deleteAllDataFromSpaceResponse/deleteAllDataFromSpaceResult');
+}
+
+sub delete_last_data {
+    my $self = shift;
+    my $space_id = $self->{space_id} || die "No space id.";
+    my $som = $self->_call('deleteLastDataFromSpace',
+                 SOAP::Data->name('spaceID')->value($space_id),
+            );
+    $self->{job_token} = $som->valueof('//deleteLastDataFromSpaceResponse/deleteLastDataFromSpaceResult');
+}
+
+sub job_status {
+    my $self = shift;
+    my $job_token = $self->{job_token} || die "no job token";
+    my $som = $self->_call('isJobComplete',
+                 SOAP::Data->name('jobToken')->value($job_token),
+            );
+    my $result = $som->valueof('//isJobCompleteResponse/isJobCompleteResult');
+    if ($result eq 'false') {
+        return 0;
+    }
+    $som = $self->_call('getJobStatus',
+                SOAP::Data->name('jobToken')->value($job_token),
+            );
+    $som->result || 1;
 }
 
 =encoding utf8
