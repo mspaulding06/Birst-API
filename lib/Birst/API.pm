@@ -155,9 +155,8 @@ sub login {
 sub logout {
     my $self = shift;
     $self->{client}->on_action(sub { "${ns}Logout" });
-    my $som = $self->{client}->call("Logout");
+    $self->_call("Logout");
     $self->{token} = 0;
-    $som->faultstring if $som->fault;
     $self;
 }
 
