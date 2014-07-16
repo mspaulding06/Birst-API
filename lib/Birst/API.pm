@@ -214,6 +214,24 @@ sub fetch {
     $_ = $row;
 }
 
+sub clear_cache {
+    my $self = shift;
+    my $space_id = $self->{space_id} || die "No space id.";
+    my $som = $self->_call('clearCacheInSpace',
+                 SOAP::Data->name('spaceID')->value($space_id),
+            );
+    my $result = $som->valueof('//clearCacheInSpaceResponse/clearCacheInSpaceResult');
+    $result eq 'true';
+}
+
+sub clear_dashboard_cache {
+    my $self = shift;
+    my $space_id = $self->{space_id} || die "No space id.";
+    $self->_call('clearDashboardCache',
+                 SOAP::Data->name('spaceID')->value($space_id),
+            );
+}
+
 sub spaces {
     my $self = shift;
     my $som = $self->_call('listSpaces');
