@@ -344,6 +344,57 @@ sub process_data_status {
     $som->result || 1;
 }
 
+sub create_subject_area {
+    my ($self, $name, $description) = (shift, shift, shift);
+    my $space_id = $self->{space_id} || die "No space id.";
+    my %opts = @_;
+    
+    my @groups = ();
+    if (exists $opts{groups}) {
+        if (ref $opts{groups} eq 'ARRAY') {
+            @groups = map { SOAP::Data->name('string')->value($_) } @{$opts{groups}};
+        }
+        else {
+            @groups = (SOAP::Data->name('string')->value($opts{groups}));
+        }
+    }
+    
+    $self->_call('createSubjectArea',
+            SOAP::Data->name('spaceID')->value($space_id),
+            SOAP::Data->name('name')->value($name),
+            SOAP::Data->name('description')->value($description),
+            SOAP::Data->name('groups')->value(\@groups),
+        );
+    $self;
+}
+
+sub delete_subject_area {
+    my ($self, $name) = @_;
+    my $space_id = $self->{space_id} || die "No space id.";
+    
+    $self->_call('deleteSubjectArea',
+            SOAP::Data->name('spaceID')->value($space_id),
+            SOAP::Data->name('name')->value($name),
+        );
+    $self;
+}
+
+sub create_directory {
+    my ($self, $dir) = @_;
+    my $space_id = $self->{space_id} || die "No space id.";
+    my $directory = path($dir)->basename;
+    my $parent = path($dir)->dirname;
+    $parent =~ s/\/$//;
+    
+    my $som = $self->_call('checkAndCreateDirectory',
+                SOAP::Data->name('spaceID')->value($space_id),
+                SOAP::Data->name('parentDir')->value($parent),
+                SOAP::Data->name('newDirectoryName')->value($directory),
+            );
+    my $result = $som->valueof('//checkAndCreateDirectoryResponse/checkAndCreateDirectoryResult');
+    $result == 'true';
+}
+
 =encoding utf8
 
 =head1 NAME
