@@ -410,7 +410,31 @@ sub create_directory {
                 SOAP::Data->name('newDirectoryName')->value($directory),
             );
     my $result = $som->valueof('//checkAndCreateDirectoryResponse/checkAndCreateDirectoryResult');
-    $result == 'true';
+    $result eq 'true';
+}
+
+sub releases {
+    my $self = shift;
+    my $som = $self->_call('listReleases');
+    $som->result;
+}
+
+sub get_engine_version {
+    my $self = shift;
+    my $space_id = $self->{space_id} || die "No space id.";
+    my $som = $self->_call('getSpaceProcessEngineVersion',
+                 SOAP::Data->name('spaceID')->value($space_id),
+            );
+    $som->valueof('//getSpaceProcessEngineVersionResponse/getSpaceProcessEngineVersionResult');
+}
+
+sub set_engine_version {
+    my ($self, $version) = @_;
+    my $space_id = $self->{space_id} || die "No space id.";
+    my $som = $self->_call('setSpaceProcessEngineVersion',
+                SOAP::Data->name('spaceID')->value($space_id),
+                SOAP::Data->name('processingVersionName')->value($version),
+            );
 }
 
 =encoding utf8
