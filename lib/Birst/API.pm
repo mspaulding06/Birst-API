@@ -415,7 +415,7 @@ sub create_directory {
 sub releases {
     my $self = shift;
     my $som = $self->_call('listReleases');
-    $som->result;
+    $som->result->{string};
 }
 
 sub get_engine_version {
