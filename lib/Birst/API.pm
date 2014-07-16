@@ -67,6 +67,10 @@ use strict;
 use warnings FATAL => 'all';
 use SOAP::Lite;
 use HTTP::Cookies;
+use IO::Compress::Zip qw(zip $ZipError);
+use File::Temp qw(:seekable);
+use MIME::Base64 qw(encode_base64);
+use Path::Tiny;
 
 our $VERSION = '0.01';
 
@@ -97,6 +101,7 @@ sub new {
         token => 0,
         query_result => undef,
         query_token => 0,
+        upload_token => 0,
         parse_datetime => 1,
     }, $class;
 }
@@ -209,6 +214,82 @@ sub spaces {
     my $self = shift;
     my $som = $self->_call('listSpaces');
     defined $som ? $som->result->{UserSpace} : undef;
+}
+
+sub upload {
+    my ($self, $filename) = (shift, shift);
+    my $space_id = $self->{space_id} || die "No space id set.";
+    
+    my %opts = @_;
+    my @opts = ();
+    my @opt_list = qw(ConsolidateIdenticalStructures ColumnNamesInFirstRow
+                      FilterLikelyNoDataRows LockDataSourceFormat
+                      IgnoreQuotesNotAtStartOrEnd RowsToSkipAtStart RowsToSkipAtEnd
+                      CharacterEncoding);
+    for (@opts) {
+        push @opts, SOAP::Data->name($_)->value($opts{$_}) if exists $opts{$_};
+    }
+    
+    my $upload_filename = path($filename)->basename;
+    my $fh;
+    if ($opts{compression} == 1) {
+        $upload_filename = path($upload_filename)->basename(qr/\.\w+$/) . '.zip';
+        $fh = File::Temp->new;
+        zip $filename => $fh, BinModeIn => 1 or die "compression failed: $ZipError";
+    }
+    else {
+        $fh = path($filename)->readr_raw;
+    }
+    
+    my $som = $self->_call('beginDataUpload',
+                 SOAP::Data->name('spaceID')->value($space_id),
+                 SOAP::Data->name('sourceName')->value($upload_filename),
+            );
+    
+    my $upload_token = $som->valueof('//beginDataUploadResponse/beginDataUploadResult');
+    
+    if (@opts) {
+        $self->_call('setDataUploadOptions',
+                     SOAP::Data->name('dataUploadToken')->value($upload_token),
+                     SOAP::Data->name('options')->value(\@opts),
+                );
+    }
+    
+    $fh->seek(0, SEEK_SET);
+    my $data = undef;
+    my $bytes = 0;
+    my $chunk_size = exists $opts{chunk_size} ? $opts{chunk_size} : 65536;
+    while ($bytes = read($fh, $data, $chunk_size)) {
+        $data = encode_base64($data);
+        $self->_call('uploadData',
+                     SOAP::Data->name('dataUploadToken')->value($upload_token),
+                     SOAP::Data->name('numBytes')->value($bytes),
+                     SOAP::Data->name('data')->value($data),
+                );
+    }
+    
+    $self->_call('finishDataUpload',
+                 SOAP::Data->name('dataUploadToken')->value($upload_token),
+            );
+    
+    $self->{upload_token} = $upload_token;
+    $self;
+}
+
+sub upload_status {
+    my $self = shift;
+    my $upload_token = $self->{upload_token} || die "no upload token";
+    my $som = $self->_call('isDataUploadComplete',
+                 SOAP::Data->name('dataUploadToken')->value($upload_token),
+            );
+    my $result = $som->valueof('//isDataUploadCompleteResponse/isDataUploadCompleteResult');
+    if ($result eq 'false') {
+        return 0;
+    }
+    $som = $self->_call('getDataUploadStatus',
+                SOAP::Data->name('dataUploadToken')->value($upload_token),
+            );
+    $som->result || 1;
 }
 
 =encoding utf8
