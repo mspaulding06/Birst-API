@@ -471,6 +471,25 @@ sub job_status {
     $som->result || 1;
 }
 
+sub sources {
+    my $self = shift;
+    my $space_id = $self->{space_id} || die "No space id.";
+    my $som = $self->_call('getSourcesList',
+                 SOAP::Data->name('spaceID')->value($space_id),
+            );
+    $som->result->{string};    
+}
+
+sub source_details {
+    my ($self, $source) = @_;
+    my $space_id = $self->{space_id} || die "No space id.";
+    my $som = $self->_call('getSourceDetails',
+                SOAP::Data->name('spaceID')->value($space_id),
+                SOAP::Data->name('sourceName')->value($source),
+            );
+    $som->result;
+}
+
 =encoding utf8
 
 =head1 NAME
