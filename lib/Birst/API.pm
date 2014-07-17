@@ -314,6 +314,18 @@ sub upload_status {
     $som->result || 1;
 }
 
+sub upload_sync {
+    my $self = shift;
+    $self->upload(@_);
+
+    my $result = 0;
+    while (not $result) {
+        $result = $self->upload_status;
+        sleep 10 unless $result;
+    }
+    $result;
+}
+
 sub process_data {
     my $self = shift;
     my $space_id = $self->{space_id} || die "No space id set.";
@@ -345,6 +357,8 @@ sub process_data {
     $self->{publish_token} = $som->valueof('//publishDataResponse/publishDataResult');
 }
 
+*publish_data = \&process_data;
+
 sub process_data_status {
     my $self = shift;
     my $publish_token = $self->{publish_token} || die "No publishing token.";
@@ -361,6 +375,22 @@ sub process_data_status {
             );
     $som->result || 1;
 }
+
+*publishing_status = \&process_data_status;
+
+sub process_data_sync {
+    my $self = shift;
+    $self->process_data(@_);
+
+    my $result = 0;
+    while (not $result) {
+        $result = $self->process_data_status;
+        sleep 10 unless $result;
+    }
+    $result;
+}
+
+*publish_data_sync = \&process_data_sync;
 
 sub create_subject_area {
     my ($self, $name, $description) = (shift, shift, shift);
@@ -471,6 +501,30 @@ sub job_status {
     $som->result || 1;
 }
 
+sub delete_all_data_sync {
+    my $self = shift;
+    $self->delete_all_data;
+
+    my $result = 0;
+    while (not $result) {
+        $result = $self->job_status;
+        sleep 10 unless $result;
+    }
+    $result;
+}
+
+sub delete_last_data_sync {
+    my $self = shift;
+    $self->data_last_data;
+    
+    my $result = 0;
+    while (not $result) {
+        $result = $self->job_status;
+        sleep 10 unless $result;
+    }
+    $result;
+}
+
 sub sources {
     my $self = shift;
     my $space_id = $self->{space_id} || die "No space id.";
@@ -500,6 +554,7 @@ Birst::API - Wrapper for the Birst Data Warehouse SOAP API.
 
     my $api = Birst::API(version => 5.13);
     $api->login($username, $password);
+    $api->set_space_by_name('My Space');
     $api->query($statement);
 
     while ($api->fetch) {
@@ -529,6 +584,21 @@ and used for all subsequent API calls.
 
 Logs out current user from Birst and clears the login token.
 
+=head2 spaces
+
+    $client->spaces;
+
+=head2 get_space_id_by_name
+
+    my $space_id = $client->get_space_id_by_name('My Space Name');
+
+=head2 set_space_id, set_space_by_name
+
+    $client->set_space_id($space_id);
+    $client->set_space_by_name('My Space Name');
+
+Sets the space to be used.
+
 =head2 query
 
     my $statment = "SELECT [Quantity],[Sales] FROM [ALL]";
@@ -551,6 +621,80 @@ Retrieve a single row from the query results. Returns L<undef> if there are no m
 =head2 copy_file and copy_file_or_dir
 
     $client->copy_file('From Space', 'My Report', 'To Space', 'My Report', 1);
+
+=head2 clear_cache
+
+    $client->clear_cache;
+
+Clear the query cache.
+
+=head2 clear_dashboard_cache
+
+    $client->clear_dashboard_cache;
+
+Clear cache for dashboard report queries.
+
+=head2 upload, upload_status, upload_sync
+
+    $client->upload('myfile.csv', compression => 1, ColumnNamesInFirstRow => 'true');
+
+    while (not $client->upload_status) {
+        # do something
+    }
+
+    $client->upload_sync('myfile.csv');
+
+Upload a data source file.
+
+=head2 process_data, process_data_status, process_data_sync
+
+    $client->process_data(subgroups => ['group1', 'group2']);
+   
+    while (not $client->process_data_status) {
+        # do something
+    }
+
+    $client->process_data_sync(subgroups => 'groupname', date => '2014-06-01');
+
+Process data for sources.
+If no subgroups are specified then all groups are processed.
+If date is not specified then the current date is used.
+
+=head2 sources
+
+    my @sources = @{$client->sources};
+
+Get list of all sources in the current space.
+
+=head2 source_details
+
+    my $details = $client->source_details('my source');
+
+Get data structure with detailed information about a data source.
+
+=head2 delete_all_data, delete_all_data_sync
+
+    $client->delete_all_data;
+
+    while (not $client->job_status) {
+        # do something
+    }
+
+    $client->delete_all_data_sync;
+
+Delete all data in the current space.
+
+=head2 delete_last_data, delete_last_data_sync
+
+    $client->delete_last_data;
+
+    while (not $client->job_status) {
+        # do something
+    }
+
+    $client->delete_last_data_sync;
+
+Delete last load of data from the current space.
 
 =head1 AUTHOR
 
