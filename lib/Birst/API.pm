@@ -201,7 +201,6 @@ sub fetch {
     my $result = $self->{query_result};
     my $row = $result->fetch;
     if (not ref $row and $result->has_more) {
-        print "Fetching more rows\n";
         my $som = $self->_call('queryMore',
                 SOAP::Data->name('queryToken')->value($self->{query_token}),
                 );
