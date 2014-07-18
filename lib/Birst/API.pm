@@ -346,19 +346,15 @@ sub upload_status {
     $som = $self->_call('getDataUploadStatus',
                 SOAP::Data->name('dataUploadToken')->value($upload_token),
             );
+    # we are done so remove upload token
+    $self->{upload_token} = 0;
     $som->result || 1;
 }
 
 sub upload_sync {
     my $self = shift;
     $self->upload(@_);
-
-    my $result = 0;
-    while (not $result) {
-        $result = $self->upload_status;
-        sleep 10 unless $result;
-    }
-    $result;
+    $self->_wait_for_status(\&upload_status);
 }
 
 sub process_data {
@@ -408,6 +404,8 @@ sub process_data_status {
     $som = $self->_call('getPublishingStatus',
                 SOAP::Data->name('publishingToken')->value($publish_token),
             );
+    # we are done so clear the publishing token
+    $self->{publish_token} = 0;
     $som->result || 1;
 }
 
@@ -416,13 +414,7 @@ sub process_data_status {
 sub process_data_sync {
     my $self = shift;
     $self->process_data(@_);
-
-    my $result = 0;
-    while (not $result) {
-        $result = $self->process_data_status;
-        sleep 10 unless $result;
-    }
-    $result;
+    $self->_wait_for_status(\&process_data_status);
 }
 
 *publish_data_sync = \&process_data_sync;
@@ -533,14 +525,20 @@ sub job_status {
     $som = $self->_call('getJobStatus',
                 SOAP::Data->name('jobToken')->value($job_token),
             );
+    # we are done, so remove job token
+    $self->{job_token} = 0;
     $som->result || 1;
 }
 
-sub _wait_for_job {
-    my $self = shift;
+sub _wait_for_status {
+    my ($self, $status_method) = @_;
+    if (not ref $status_method eq 'CODE') {
+        die "Must supply a status method sub.";
+    }
+    
     my $result = 0;
     while (not $result) {
-        $result = $self->job_status;
+        $result = $status_method->($self);
         sleep 10 unless $result;
     }
     $result;
@@ -549,13 +547,13 @@ sub _wait_for_job {
 sub delete_all_data_sync {
     my $self = shift;
     $self->delete_all_data;
-    $self->_wait_for_job;
+    $self->_wait_for_status(\&job_status);
 }
 
 sub delete_last_data_sync {
     my $self = shift;
     $self->data_last_data;
-    $self->_wait_for_job;
+    $self->_wait_for_status(\&job_status);
 }
 
 sub sources {
@@ -633,7 +631,7 @@ sub copy_space {
 sub copy_space_sync {
     my $self = shift;
     $self->copy_space(@_);
-    $self->_wait_for_job;
+    $self->_wait_for_status(\&job_status);
 }
 
 sub replicate_space {
@@ -644,7 +642,7 @@ sub replicate_space {
 sub replicate_space_sync {
     my $self = shift;
     $self->replicate_space(@_);
-    $self->_wait_for_job;
+    $self->_wait_for_status(\&job_status);
 }
 
 sub delete_space {
@@ -659,7 +657,24 @@ sub delete_space {
 sub delete_space_sync {
     my $self = shift;
     $self->delete_space(@_);
-    $self->_wait_for_job;
+    $self->_wait_for_status(\&job_status);
+}
+
+sub swap_space_contents {
+    my ($self, $space_from, $space_to) = @_;
+    my $space_from_id = $self->get_space_id_by_name($space_from);
+    my $space_to_id = $self->get_space_id_by_name($space_to);
+    my $som = $self->_call('swapSpaceContents',
+                           SOAP::Data->name('sp1ID')->value($space_from_id),
+                           SOAP::Data->name('sp2ID')->value($space_to_id),
+                    );
+    $self->{job_token} = $som->valueof('//swapSpaceContentsResponse/swapSpaceContentsResult');
+}
+
+sub swap_space_contents_sync {
+    my $self = shift;
+    $self->swap_space_contents(@_);
+    $self->_wait_for_status(\&job_status);
 }
 
 =encoding utf8
