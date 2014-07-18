@@ -237,18 +237,54 @@ sub spaces {
     defined $som ? $som->result->{UserSpace} : undef;
 }
 
+sub _uploadopt {
+    my ($self, $_, $value) = @_;
+    my $opt;
+    
+    if (/consolidate/) {
+        $opt = 'ConsolidateIdenticalStructures';
+        $value = $value ? 'true' : 'false';
+    }
+    elsif (/column/) {
+        $opt = 'ColumnNamesInFirstRow';
+        $value = $value ? 'true' : 'false';
+    }
+    elsif (/filter/) {
+        $opt = 'FilterLikelyNoDataRows';
+        $value = $value ? 'true' : 'false';
+    }
+    elsif (/lock/) {
+        $opt = 'LockDataSourceFormat';
+        $value = $value ? 'true' : 'false';
+    }
+    elsif (/ignore/) {
+        $opt = 'IgnoreQuotesNotAtStartOrEnd';
+        $value = $value ? 'true' : 'false';
+    }
+    elsif (/skip(_|)at(_|)start/) {
+        $opt = 'RowsToSkipAtStart';
+    }
+    elsif (/skip(_|)at(_|)end/) {
+        $opt = 'RowsToSkipAtEnd';
+    }
+    elsif (/encoding/) {
+        $opt = 'CharacterEncoding';
+    }
+
+    return ($opt, $value);
+}
+
 sub upload {
     my ($self, $filename) = (shift, shift);
     my $space_id = $self->{space_id} || die "No space id set.";
     
     my %opts = @_;
     my @opts = ();
-    my @opt_list = qw(ConsolidateIdenticalStructures ColumnNamesInFirstRow
-                      FilterLikelyNoDataRows LockDataSourceFormat
-                      IgnoreQuotesNotAtStartOrEnd RowsToSkipAtStart RowsToSkipAtEnd
-                      CharacterEncoding);
-    for (@opts) {
-        push @opts, SOAP::Data->name($_)->value($opts{$_}) if exists $opts{$_};
+    for (keys %opts) {
+        my ($opt, $value) = $self->_uploadopt($_, $opts{$_});
+        if ($opt) {
+            push @opts, SOAP::Data->name($opt)->value($value);
+        }
     }
     
     my $upload_filename = path($filename)->basename;
@@ -608,6 +644,21 @@ sub replicate_space {
 sub replicate_space_sync {
     my $self = shift;
     $self->replicate_space(@_);
+    $self->_wait_for_job;
+}
+
+sub delete_space {
+    my ($self, $space) = @_;
+    my $space_id = get_space_id_by_name($space);
+    my $som = $self->_call('deleteSpace',
+                 SOAP::Data->name('spaceId')->value($space_id),
+            );
+    $self->{job_token} = $som->valueof('//deleteSpaceResponse/deleteSpaceResult');
+}
+
+sub delete_space_sync {
+    my $self = shift;
+    $self->delete_space(@_);
     $self->_wait_for_job;
 }
 
