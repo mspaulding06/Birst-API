@@ -500,10 +500,8 @@ sub job_status {
     $som->result || 1;
 }
 
-sub delete_all_data_sync {
+sub _wait_for_job {
     my $self = shift;
-    $self->delete_all_data;
-
     my $result = 0;
     while (not $result) {
         $result = $self->job_status;
@@ -512,16 +510,16 @@ sub delete_all_data_sync {
     $result;
 }
 
+sub delete_all_data_sync {
+    my $self = shift;
+    $self->delete_all_data;
+    $self->_wait_for_job;
+}
+
 sub delete_last_data_sync {
     my $self = shift;
     $self->data_last_data;
-    
-    my $result = 0;
-    while (not $result) {
-        $result = $self->job_status;
-        sleep 10 unless $result;
-    }
-    $result;
+    $self->_wait_for_job;
 }
 
 sub sources {
@@ -541,6 +539,76 @@ sub source_details {
                 SOAP::Data->name('sourceName')->value($source),
             );
     $som->result;
+}
+
+sub _copyopt {
+    my ($self, $_) = @_;
+    tr/_/-/;
+    return 'DrillMaps.xml' if /drill(-|)map/;
+    return 'CustomGeoMaps.xml' if /geo(-|)map/;
+    return 'spacesettings.xml' if /space(-|)setting/;
+    return 'SavedExpressions.xml' if /saved(-|)expression/;
+    if (/datastore-\w+-/) {
+        s/-(\w+)$/_$1/;
+    }
+    return $_;
+}
+
+sub _buildcopyopts {
+    my $self = shift;
+    my %opts = @_;
+    my @copy_options = ();
+    for (keys %opts) {
+        if (not ref $opts{$_}) {
+            if ($opts{$_} eq 1) {
+                push @copy_options, $self->_copyopt($_);
+            }
+            else {
+                push @copy_options, join(':', $self->_copyopt($_), $opts{$_});
+            }
+        }
+        elsif (ref $opts{$_} eq 'ARRAY') {
+            # add option in form <opt>:<item1>,<item2>...
+            push @copy_options, join(':', $self->_copyopt($_), join(',', @{$opts{$_}}));
+        }
+    }
+    join(';', @copy_options);
+}
+
+sub _copyspace {
+    my ($self, $copy_type, $space_from, $space_to) = (shift, shift, shift, shift);
+    my $space_from_id = $self->get_space_id_by_name($space_from);
+    my $space_to_id = $self->get_space_id_by_name($space_to);
+    my $opts = $self->_buildcopyopts(@_);
+    my $som = $self->_call('copySpace',
+                 SOAP::Data->name('spFromID')->value($space_from_id),
+                 SOAP::Data->name('spToID')->value($space_to_id),
+                 SOAP::Data->name('mode')->value($copy_type),
+                 SOAP::Data->name('options')->value($opts),
+            );
+    $self->{job_token} = $som->valueof('//copySpaceResponse/copySpaceResult');
+}
+
+sub copy_space {
+    my $self = shift;
+    $self->_copyspace('copy', @_);
+}
+
+sub copy_space_sync {
+    my $self = shift;
+    $self->copy_space(@_);
+    $self->_wait_for_job;
+}
+
+sub replicate_space {
+    my $self = shift;
+    $self->_copyspace('replicate', @_);
+}
+
+sub replicate_space_sync {
+    my $self = shift;
+    $self->replicate_space(@_);
+    $self->_wait_for_job;
 }
 
 =encoding utf8
