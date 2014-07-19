@@ -32,15 +32,32 @@ sub token { $_[0]->{token} }
 sub _process_result {
     my ($self, $som) = @_;
     my $raw_result = $som->result || return;
-    my @types = @{$raw_result->{dataTypes}->{int}};
-    my @columns = @{$raw_result->{columnNames}->{string}};
-    my @display_names = @{$raw_result->{displayNames}->{string}};
-    my @rows = ();
+    my (@types, @columns, @display_names, @rows);
+    if (ref $raw_result->{dataTypes}->{int} eq 'ARRAY') {
+        @types = @{$raw_result->{dataTypes}->{int}};
+    }
+    else {
+        @types = ($raw_result->{dataTypes}->{int});
+    }
+    if (ref $raw_result->{columnNames}->{string} eq 'ARRAY') {
+        @columns = @{$raw_result->{columnNames}->{string}};
+    }
+    else {
+        @columns = ($raw_result->{columnNames}->{string});
+    }
+    if (ref $raw_result->{displayNames}->{string}) {
+        @display_names = @{$raw_result->{displayNames}->{string}};
+    }
+    else {
+        @display_names = ($raw_result->{displayNames}->{string});
+    }
+    # Make sure we are consistent and always return an ARRAY ref for each row.
     if (ref $raw_result->{rows}->{ArrayOfString} eq 'ARRAY') {
-        @rows = map { $_->{string} } @{$raw_result->{rows}->{ArrayOfString}};
+        @rows = map { ref $_->{string} ? $_->{string} : [$_->{string}] } @{$raw_result->{rows}->{ArrayOfString}};
     }
     elsif (ref $raw_result->{rows}->{ArrayOfString} eq 'HASH') {
-        @rows = $raw_result->{rows}->{ArrayOfString}->{string};
+        my $row = $raw_result->{rows}->{ArrayOfString}->{string};
+        @rows = ref $row ? $row : [$row];
     }
 
     $self->{row_count} = 0 + $raw_result->{numRowsReturned};
@@ -111,11 +128,18 @@ sub new {
     }, $class;
 }
 
+sub _print_fault {
+    my ($self, $_) = @_;
+    # Try and make fault messages less cryptic
+    die "Logical query syntax is incorrect." if /Object reference not set to an instance of an object./;
+    die $_;
+}
+
 sub _call {
     my ($self, $method) = (shift, shift);
     my $som = $self->{client}->on_action(sub {"${ns}${method}"})
         ->call($method => SOAP::Data->name('token')->value($self->{token}), @_);
-    die $som->faultstring if $som->fault;
+    die $self->_print_fault($som->faultstring) if $som->fault;
     $som;
 }
 
