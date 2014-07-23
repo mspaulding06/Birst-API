@@ -1,4 +1,5 @@
 package Birst::QueryResult;
+use 5.012;
 use strict;
 use warnings FATAL => 'all';
 use SOAP::Lite;
@@ -80,6 +81,7 @@ sub _process_result {
 }
 
 package Birst::API;
+use 5.012;
 use strict;
 use warnings FATAL => 'all';
 use SOAP::Lite;
@@ -129,10 +131,10 @@ sub new {
 }
 
 sub _print_fault {
-    my ($self, $_) = @_;
+    my ($self, $message) = @_;
     # Try and make fault messages less cryptic
-    die "Logical query syntax is incorrect." if /Object reference not set to an instance of an object./;
-    die $_;
+    die "Logical query syntax is incorrect." if $message =~ /Object reference not set to an instance of an object./;
+    die $message;
 }
 
 sub _call {
@@ -258,12 +260,13 @@ sub clear_dashboard_cache {
 sub spaces {
     my $self = shift;
     my $som = $self->_call('listSpaces');
-    defined $som ? $som->result->{UserSpace} : undef;
+    $_ = defined $som ? $som->result->{UserSpace} : undef;
 }
 
 sub _uploadopt {
-    my ($self, $_, $value) = @_;
+    my ($self, $arg, $value) = @_;
     my $opt;
+	$_ = $arg;
     
     if (/consolidate/) {
         $opt = 'ConsolidateIdenticalStructures';
@@ -600,7 +603,8 @@ sub source_details {
 }
 
 sub _copyopt {
-    my ($self, $_) = @_;
+    my ($self, $arg) = @_;
+	$_ = $arg;
     tr/_/-/;
     return 'DrillMaps.xml' if /drill(-|)map/;
     return 'CustomGeoMaps.xml' if /geo(-|)map/;
