@@ -260,7 +260,15 @@ sub clear_dashboard_cache {
 sub spaces {
     my $self = shift;
     my $som = $self->_call('listSpaces');
-    $_ = defined $som ? $som->result->{UserSpace} : undef;
+	if (defined $som) {
+		if (ref $som->result->{UserSpace} eq 'ARRAY') {
+			return $_ = $som->result->{UserSpace};
+		}
+		elsif (ref $som->result->{UserSpace} eq 'HASH') {
+			return $_ = [$som->result->{UserSpace}];
+		}
+	}
+	undef;
 }
 
 sub _uploadopt {
