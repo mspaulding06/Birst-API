@@ -562,6 +562,15 @@ sub delete_last_data {
     $self->{job_token} = $som->valueof('//deleteLastDataFromSpaceResponse/deleteLastDataFromSpaceResult');
 }
 
+sub delete_file_or_dir {
+    my ($self, $file) = @_;
+    my $space_id = $self->{space_id} || die "No space id.";
+    $self->_call('deleteFileOrDirectory',
+                 SOAP::Data->name('spaceID')->value($space_id),
+                 SOAP::Data->name('fileOrDir')->value($file),
+                 );
+}
+
 sub job_status {
     my $self = shift;
     my $job_token = $self->{job_token} || die "no job token";
@@ -726,6 +735,274 @@ sub swap_space_contents_sync {
     my $self = shift;
     $self->swap_space_contents(@_);
     $self->_wait_for_status(\&job_status);
+}
+
+sub add_group_acl {
+    my ($self, $group, $tag) = @_;
+    my $space_id = $self->{space_id} || die "No space id.";
+    $self->_call('addAclToGroupInSpace',
+                 SOAP::Data->name('groupName')->value($group),
+                 SOAP::Data->name('aclTag')->value($tag),
+                 SOAP::Data->name('spaceID')->value($space_id),
+                 );
+}
+
+sub allow_ip_cidr {
+    my ($self, $ip) = @_;
+    my %opts = @_;
+    if (exists $opts{user}) {
+        $self->_call('addAllowedIp',
+                     SOAP::Data->name('userName')->value($opts{user}),
+                     SOAP::Data->name('ip')->value($ip),
+                     );
+    }
+    else {
+        $self->_call('addAllowedIPAddrForAccount',
+                     SOAP::Data->name('ip')->value($ip),
+                     );
+    }
+}
+
+sub add_group {
+    my ($self, $group) = @_;
+    my $space_id = $self->{space_id} || die "No space id.";
+    $self->_call('addGroupToSpace',
+                 SOAP::Data->name('groupName')->value($group),
+                 SOAP::Data->name('spaceID')->value($space_id),
+                 );
+}
+
+sub add_openid {
+    my ($self, $user, $openid) = @_;
+    $self->_call('addOpenID',
+                 SOAP::Data->name('userName')->value($user),
+                 SOAP::Data->name('openID')->value($openid),
+                 );
+}
+
+sub add_proxy_user {
+    my ($self, $user, $proxyuser, $expire) = @_;
+    my $xsd_expire = parse_datetime($expire)->strftime($xsd_datetime_format);
+    $self->_call('addProxyUser',
+                 SOAP::Data->name('userName')->value($user),
+                 SOAP::Data->name('proxyUserName')->value($proxyuser),
+                 SOAP::Data->name('expiration')->value($xsd_expire),
+                 );
+}
+
+sub add_user {
+    my ($self, $user) = (shift, shift);
+    my %opts = @_;
+    my $params = join(' ', map { $_ . "=" . $opts{$_} } \
+                      grep { defined $opts{$_} } qw(email password));
+    $self->_call('addUser',
+                 SOAP::Data->name('userName')->value($user),
+                 SOAP::Data->name('additionalParams')->value($params),
+                 );
+}
+
+sub add_user_to_group {
+    my ($self, $user, $group) = @_;
+    my $space_id = $self->{space_id} || die "No space id.";
+    $self->_call('addUserToGroupInSpace',
+                 SOAP::Data->name('userName')->value($user),
+                 SOAP::Data->name('groupName')->value($group),
+                 SOAP::Data->name('spaceID')->value($space_id),
+                 );
+}
+
+sub add_user_to_space {
+    my ($self, $user) = (shift, shift);
+    my $space_id = $self->{space_id} || die "No space id.";
+    my %opts = @_;
+    my $admin = $opts{admin} == 1 ? 'true' : 'false';
+    $self->_call('addUserToSpace',
+                 SOAP::Data->name('userName')->value($user),
+                 SOAP::Data->name('spaceID')->value($space_id),
+                 SOAP::Data->name('hasAdmin')->value($admin),
+                );
+}
+
+sub copy_catalog_dir {
+    my ($self, $space_from, $space_to, $dir) = @_;
+    my $som = $self->_call('copyCatalogDirectory',
+                 SOAP::Data->name('spFromID')->value($space_from),
+                 SOAP::Data->name('spToID')->value($space_to),
+                 SOAP::Data->name('directoryName')->value($dir),
+                );
+    $som->valueof('//copyCatalogDirectoryResponse/copyCatalogDirectoryResult') eq 'true';
+}
+
+sub copy_subject_area {
+    my ($self, $space_from, $space_to, $area) = @_;
+    $self->_call('copyCustomSubjectArea',
+                 SOAP::Data->name('fromSpaceId')->value($space_from),
+                 SOAP::Data->name('toSpaceId')->value($space_to),
+                 SOAP::Data->name('customSubjectAreaName')->value($area),
+                 );
+}
+
+sub create_space {
+    my ($self, $space) = @_;
+    my %opts = @_;
+    my $comment = $opts{comment} || '';
+    my $automatic = $opts{automatic} == 1 ? 'true' : 'false';
+    my @params = (
+        SOAP::Data->name('spaceName')->value($space),
+        SOAP::Data->name('comments')->value($comment),
+        SOAP::Data->name('automatic')->value($automatic),
+    );
+    my $som;
+    if (defined $opts{schema}) {
+        push @params, SOAP::Data->name('schemaName')->value($opts{schema});
+        $som = $self->_call('createNewSpaceUsingSchema', @params);
+    }
+    else {
+        $som = $self->_call('createNewSpace', @params);
+    }
+    $som->valueof('//createNewSpaceResponse/createNewSpaceResult') eq 'true';
+}
+
+sub delete_user {
+    my ($self, $user) = @_;
+    $self->_call('deleteUser',
+                 SOAP::Data->name('userName')->value($user),
+                );
+}
+
+sub enable_account {
+    my ($self, $account_id) = @_;
+    $self->_call('enableAccount',
+                 SOAP::Data->name('accountID')->value($account_id),
+                 SOAP::Data->name('enable')->value('true'),
+                 );
+}
+
+sub disable_account {
+    my ($self, $account_id) = @_;
+    $self->_call('enableAccount',
+                 SOAP::Data->name('accountID')->value($account_id),
+                 SOAP::Data->name('enable')->value('false'),
+                 );
+}
+
+sub enable_source {
+    my ($self, $source) = @_;
+    my $space_id = $self->{space_id} || die "No space id.";
+    $self->_call('enableSourceInSpace',
+                 SOAP::Data->name('spaceID')->value($space_id),
+                 SOAP::Data->name('dataSourceName')->value($source),
+                 SOAP::Data->name('enabled')->value('true'),
+                 );
+}
+
+sub disable_source {
+    my ($self, $source) = @_;
+    my $space_id = $self->{space_id} || die "No space id.";
+    $self->_call('enableSourceInSpace',
+                 SOAP::Data->name('spaceID')->value($space_id),
+                 SOAP::Data->name('dataSourceName')->value($source),
+                 SOAP::Data->name('enabled')->value('false'),
+                 );
+}
+
+sub enable_user {
+    my ($self, $user) = @_;
+    $self->_call('enableUser',
+                 SOAP::Data->name('userName')->value($user),
+                 SOAP::Data->name('enable')->value('true'),
+                );
+}
+
+sub disable_user {
+    my ($self, $user) = @_;
+    $self->_call('enableUser',
+                 SOAP::Data->name('userName')->value($user),
+                 SOAP::Data->name('enable')->value('false'),
+                );
+}
+
+sub execute_report_schedule {
+    my ($self, $report) = @_;
+    my $space_id = $self->{space_id} || die "No space id.";
+    $self->_call('executeScheduledReport',
+                 SOAP::Data->name('spaceId')->value($space_id),
+                 SOAP::Data->name('reportScheduleName')->value($report),
+                 );
+}
+
+my @export_types = qw(CSV PDF PNG PPT RTF XLS);
+
+sub export_report {
+    my ($self, $report, $type) = (shift, shift, shift);
+    my $space_id = $self->{space_id} || die "No space id.";
+    $type = uc $type;
+    die "Unknown report type: $type" if none { $type eq $_ } @export_types;
+    my %opts = @_;
+    my @filters = ();
+    if (ref $opts{filters} eq 'ARRAY') {
+        for (@{$opts{filters}}) {
+            die "Must be a Birst::Filter obeject." unless ref $_ eq 'Birst::Filter';
+            push @filters, $_->soapify;
+        }
+    }
+    my @params = (
+        SOAP::Data->name('spaceId')->value($space_id),
+        SOAP::Data->name('reportPath')->value($report),
+    );
+    if (@filters) {
+        push @params, SOAP::Data->name('reportFilters')->value(\@filters);
+    }
+    my $som = $self->_call('exportReportTo' . $type, @params);
+    $self->{job_token} = $som->valueof('//exportReportTo' . $type . 'Response/exportReportTo' . $type . 'Result');
+}
+
+sub export_report_sync {
+    my ($self, $file) = (shift, shift);
+    $self->export_report(@_);
+    $self->{job_token} = $self->{export_token};
+    $self->_wait_for_status(\&job_status);
+    my $som = $self->_call('getExportData',
+                        SOAP::Data->name('exportToken')->value($self->{export_token}),
+                        );
+    die "No report data available." if not $som->result;
+    open(my $fh, ">:raw", $file) or die "Unable to open file: $!";
+    print $fh decode_base64($som->result);
+    close($fh);
+}
+
+sub get_dir_contents {
+    my ($self, $dir) = @_;
+    my $space_id = $self->{space_id} || die "No space id.";
+    my $som = $self->_call('getDirectoryContents',
+                 SOAP::Data->name('spaceID')->value($space_id),
+                 SOAP::Data->name('dir')->value($dir),
+                );
+    my $result = $som->result;
+    if ($result) {
+        if (ref $result->{children} eq 'HASH') {
+            $result->{children} = $result->{children}->{FileNode};
+        }
+    }
+    $result;
+}
+
+sub get_dir_perms {
+    my ($self, $dir) = @_;
+    my $space_id = $self->{space_id} || die "No space id.";
+    my $som = $self->_call('getDirectoryPermissions',
+                           SOAP::Data->name('spaceID')->value($space_id),
+                           SOAP::Data->name('dir')->value($dir),
+                           );
+    my $result = $som->result;
+    my $fixed_result;
+    if (ref $result eq 'HASH') {
+        for(@{$result->{GroupPermission}}) {
+            my $group = delete $_->{groupName};
+            $fixed_result->{$group} = $_;
+        }
+    }
+    $fixed_result;
 }
 
 =encoding utf8
