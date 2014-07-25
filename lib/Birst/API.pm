@@ -128,7 +128,8 @@ sub new {
 # TODO: Figure out why cookie_jar param does not work on SOAP::Lite
     $client->transport->proxy->cookie_jar(HTTP::Cookies->new);
 
-    SOAP::Lite->import(+trace => 'all') if defined $opts{debug} and $opts{debug} == 1;
+    SOAP::Lite->import(+trace => 'all'), $client->readable(1)
+        if defined $opts{debug} and $opts{debug} == 1;
 
     bless {
         client         => $client,
