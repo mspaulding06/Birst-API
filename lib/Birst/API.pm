@@ -4,7 +4,12 @@ use strict;
 use warnings FATAL => 'all';
 use SOAP::Lite;
 use DateTime;
-use DateTime::Format::Flexible;
+
+BEGIN {
+    require DateTime::Format::Flexible;
+}
+
+*parse_datetime = \&DateTime::Format::Flexible::parse_datetime;
 
 sub new {
     my ($class, $som) = @_;
@@ -69,7 +74,7 @@ sub _process_result {
     for my $row (@rows) {
         for (0..$#types) {
             if ($types[$_] == 93) {
-                $row->[$_] = DateTime::Format::Flexible->parse_datetime($row->[$_]);
+                $row->[$_] = parse_datetime($row->[$_]);
             }
         }
     }
@@ -88,10 +93,17 @@ use SOAP::Lite;
 use HTTP::Cookies;
 use IO::Compress::Zip qw(zip $ZipError);
 use File::Temp qw(:seekable);
-use MIME::Base64 qw(encode_base64);
+use MIME::Base64 qw(encode_base64 decode_base64);
 use Path::Tiny;
 use DateTime;
-use DateTime::Format::Flexible;
+use List::MoreUtils qw(none);
+
+BEGIN {
+    require Birst::Filter;
+    require DateTime::Format::Flexible;
+}
+
+*parse_datetime = \&DateTime::Format::Flexible::parse_datetime;
 
 our $VERSION = '0.01';
 
@@ -399,7 +411,7 @@ sub process_data {
     
     my $date;
     if (exists $opts{date}) {
-        $date = DateTime::Format::Flexible->parse_datetime($opts{date})->strftime($xsd_datetime_format);
+        $date = parse_datetime($opts{date})->strftime($xsd_datetime_format);
     }
     else {
         $date = DateTime->now->strftime($xsd_datetime_format);
