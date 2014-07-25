@@ -201,7 +201,9 @@ sub logout {
 }
 
 sub copy_file {
-    my ($self, $from_space_id, $from_filename, $to_space_id, $to_filename, $overwrite) = @_;
+    my ($self, $from_space_id, $from_filename, $to_space_id, $to_filename) = @_;
+    my %opts = @_;
+    my $overwrite = $opts{overwrite} == 1 ? 'true' : 'false';
     $self->_call('copyFile',
             SOAP::Data->name('fromSpaceID')->value($from_space_id),
             SOAP::Data->name('fromFileOrDir')->value($from_filename),
