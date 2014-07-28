@@ -3,13 +3,16 @@ use Moose;
 use Moose::Util::TypeConstraints;
 use SOAP::Lite;
 
-enum 'FilterType'      => [qw(Data Display Set-based)];
-enum 'MultiselectType' => [qw(OR AND)];
-enum 'Operation'       => ['>', '<', '>=', '<=', '<>', 'LIKE', 'NOT LIKE', 'IS NULL', 'IS NOT NULL'];
+enum 'Birst::FilterType'      => [qw(Data Display Set-based)];
+enum 'Birst::MultiselectType' => [qw(OR AND)];
+enum 'Birst::Operation'       => ['>', '<', '>=', '<=', '<>', 'LIKE', 'NOT LIKE', 'IS NULL', 'IS NOT NULL'];
+
+subtype 'Birst::SelectedValues' => as 'ArrayRef[Str]';
+coerce  'Birst::SelectedValues' => from 'Str' => via { [$_] };
 
 has 'filter_type' => (
     is => 'rw',
-    isa => 'FilterType',
+    isa => 'Birst::FilterType',
     required => 1,
     default => 'Data',
     lazy => 1,
@@ -17,13 +20,13 @@ has 'filter_type' => (
 
 has 'op' => (
     is => 'rw',
-    isa => 'Operation',
+    isa => 'Birst::Operation',
     required => 1,
 );
 
 has 'multiselect_type' => (
     is => 'rw',
-    isa => 'MultiselectType',
+    isa => 'Birst::MultiselectType',
     required => 1,
     default => 'OR',
     lazy => 1,
@@ -37,8 +40,9 @@ has 'column' => (
 
 has 'values' => (
     is => 'rw',
-    isa => 'ArrayRef',
+    isa => 'Birst::SelectedValues',
     required => 1,
+    coerce => 1,
     default => sub { [] },
 );
 
