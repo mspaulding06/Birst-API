@@ -1,90 +1,3 @@
-package Birst::QueryResult;
-use 5.012;
-use strict;
-use warnings FATAL => 'all';
-use SOAP::Lite;
-use DateTime;
-
-BEGIN {
-    require DateTime::Format::Flexible;
-}
-
-*parse_datetime = \&DateTime::Format::Flexible::parse_datetime;
-
-sub new {
-    my ($class, $som) = @_;
-    my $self = bless {
-        row_count => 0,
-        more_rows => 0,
-        columns   => [],
-        names     => [],
-        rows      => [],
-    }, $class;
-    $self->_process_result($som);
-    $self;
-}
-
-sub fetch {
-    my $self = shift;
-    return unless @{$self->{rows}};
-    $self->{row_count}--;
-    shift @{$self->{rows}};
-}
-
-sub has_more { $_[0]->{more_rows} }
-
-sub token { $_[0]->{token} }
-
-sub _process_result {
-    my ($self, $som) = @_;
-    my $raw_result = $som->result || return;
-    my (@types, @columns, @display_names, @rows);
-    if (ref $raw_result->{dataTypes}->{int} eq 'ARRAY') {
-        @types = @{$raw_result->{dataTypes}->{int}};
-    }
-    else {
-        @types = ($raw_result->{dataTypes}->{int});
-    }
-    if (ref $raw_result->{columnNames}->{string} eq 'ARRAY') {
-        @columns = @{$raw_result->{columnNames}->{string}};
-    }
-    else {
-        @columns = ($raw_result->{columnNames}->{string});
-    }
-    if (ref $raw_result->{displayNames}->{string}) {
-        @display_names = @{$raw_result->{displayNames}->{string}};
-    }
-    else {
-        @display_names = ($raw_result->{displayNames}->{string});
-    }
-    # Make sure we are consistent and always return an ARRAY ref for each row.
-    if (ref $raw_result->{rows}->{ArrayOfString} eq 'ARRAY') {
-        @rows = map { ref $_->{string} ? $_->{string} : [$_->{string}] } @{$raw_result->{rows}->{ArrayOfString}};
-    }
-    elsif (ref $raw_result->{rows}->{ArrayOfString} eq 'HASH') {
-        my $row = $raw_result->{rows}->{ArrayOfString}->{string};
-        @rows = ref $row ? $row : [$row];
-    }
-
-    $self->{row_count} = 0 + $raw_result->{numRowsReturned};
-    $self->{more_rows} = $raw_result->{hasMoreRows} eq 'true' ? 1 : 0;
-    $self->{token} = $raw_result->{queryToken};
-
-# Do DateTime conversion
-    for my $row (@rows) {
-        for (0..$#types) {
-            if ($types[$_] == 93) {
-                $row->[$_] = parse_datetime($row->[$_]);
-            }
-        }
-    }
-
-    $self->{columns} = \@columns;
-    $self->{names}   = \@display_names;
-    $self->{rows}    = \@rows;
-    undef;
-}
-
 package Birst::API;
 use 5.012;
 use strict;
@@ -231,6 +144,7 @@ sub query {
             SOAP::Data->name('query')->value($query),
             SOAP::Data->name('spaceID')->value($space_id),
             );
+    require Birst::QueryResult;
     $self->{query_result} = Birst::QueryResult->new($som);
     $self->{query_token} = $self->{query_result}->token;
     $self;
