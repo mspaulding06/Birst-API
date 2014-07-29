@@ -2,6 +2,7 @@ package Birst::API;
 use 5.012;
 use strict;
 use warnings FATAL => 'all';
+use Moose;
 use SOAP::Lite;
 use HTTP::Cookies;
 use IO::Compress::Zip qw(zip $ZipError);
@@ -10,6 +11,7 @@ use MIME::Base64 qw(encode_base64 decode_base64);
 use Path::Tiny;
 use DateTime;
 use List::MoreUtils qw(none);
+use Scalar::Util qw(reftype);
 
 BEGIN {
     require Birst::Filter;
@@ -30,30 +32,88 @@ my %wsdl = (
         5.13 => 'https://app2102.bws.birst.com/CommandWebService.asmx?WSDL',
         );
 
-sub new {
-    my $class = shift;
-    my %opts = @_;
+has 'client' => (
+    is => 'ro',
+    isa => 'SOAP::Lite',
+    writer => '_client',
+);
 
-    $opts{version} = 5.13 unless defined $opts{version};
+has 'token' => (
+    is => 'ro',
+    isa => 'Str',
+    writer => '_token',
+    clearer => 'clear_token',
+    predicate => 'has_token',
+    init_arg => undef,
+);
 
-    my $uri = $wsdl{$opts{version}};
-    my $client = SOAP::Lite->new(proxy => $uri)->default_ns($ns)->envprefix('soap');
-# TODO: Figure out why cookie_jar param does not work on SOAP::Lite
-    $client->transport->proxy->cookie_jar(HTTP::Cookies->new);
+has 'query_result' => (
+    is => 'ro',
+    isa => 'Birst::QueryResult',
+    writer => '_query_result',
+    clearer => 'clear_query_result',
+    predicate => 'has_query_result',
+    init_arg => undef,
+);
 
-    SOAP::Lite->import(+trace => 'all'), $client->readable(1)
-        if defined $opts{debug} and $opts{debug} == 1;
+has 'query_token' => (
+    is => 'ro',
+    isa => 'Str',
+    writer => '_query_token',
+    clearer => 'clear_query_token',
+    predicate => 'has_query_token',
+    init_arg => undef,
+);
 
-    bless {
-        client         => $client,
-        token          => 0,
-        query_result   => undef,
-        query_token    => 0,
-        upload_token   => 0,
-        publish_token  => 0,
-        job_token      => 0,
-        parse_datetime => 1,
-    }, $class;
+has 'upload_token' => (
+    is => 'ro',
+    isa => 'Str',
+    writer => '_upload_token',
+    clearer => 'clear_upload_token',
+    predicate => 'has_upload_token',
+    init_arg => undef,
+);
+
+has 'publish_token' => (
+    is => 'ro',
+    isa => 'Str',
+    writer => '_publish_token',
+    clearer => 'clear_publish_token',
+    predicate => 'has_publish_token',
+    init_arg => undef,
+);
+
+has 'job_token' => (
+    is => 'ro',
+    isa => 'Str',
+    writer => '_job_token',
+    clearer => 'clear_job_token',
+    predicate => 'has_job_token',
+    init_arg => undef,
+);
+
+has 'export_token' => (
+    is => 'ro',
+    isa => 'Str',
+    writer => '_export_token',
+    clearer => 'clear_export_token',
+    predicate => 'has_export_token',
+    init_arg => undef,
+);
+
+has 'space_id' => (
+    is => 'rw',
+    isa => 'Str',
+    predicate => 'has_space_id',
+);
+
+sub BUILD {
+    my ($self, $params) = (shift, shift);
+    my $version = $params->{version} || 5.13;
+    $self->_client(SOAP::Lite->new(proxy => $wsdl{$version})->default_ns($ns)->envprefix('soap'));
+    $self->client->transport->proxy->cookie_jar(HTTP::Cookies->new);
+    SOAP::Lite->import(+trace => 'all'), $self->client->readable(1)
+        if defined $params->{debug} and $params->{debug} == 1;
 }
 
 sub _print_fault {
@@ -65,21 +125,15 @@ sub _print_fault {
 
 sub _call {
     my ($self, $method) = (shift, shift);
-    my $som = $self->{client}->on_action(sub {"${ns}${method}"})
-        ->call($method => SOAP::Data->name('token')->value($self->{token}), @_);
+    my $som = $self->client->on_action(sub {"${ns}${method}"})
+        ->call($method => SOAP::Data->name('token')->value($self->token), @_);
     die $self->_print_fault($som->faultstring) if $som->fault;
     $som;
 }
 
-sub set_space_id {
-    my ($self, $space_id) = @_;
-    $self->{space_id} = $space_id;
-    $self;
-}
-
 sub set_space_by_name {
     my ($self, $space_name) = @_;
-    $self->set_space_id($self->get_space_id_by_name($space_name));
+    $self->space_id($self->get_space_id_by_name($space_name));
 }
 
 sub get_space_id_by_name {
@@ -95,21 +149,21 @@ sub get_space_id_by_name {
 
 sub login {
     my ($self, $username, $password) = @_;
-    $self->{client}->on_action(sub { "${ns}Login" });
+    $self->client->on_action(sub { "${ns}Login" });
     my $som = $self->{client}->call("Login",
             SOAP::Data->name('username')->value($username),
             SOAP::Data->name('password')->value($password),
             );
     $som->faultstring if $som->fault;
-    $self->{token} = $som->valueof('//LoginResponse/LoginResult');
+    $self->_token($som->valueof('//LoginResponse/LoginResult'));
     $self;
 }
 
 sub logout {
     my $self = shift;
-    $self->{client}->on_action(sub { "${ns}Logout" });
+    $self->client->on_action(sub { "${ns}Logout" });
     $self->_call("Logout");
-    $self->{token} = 0;
+    $self->clear_token;
     $self;
 }
 
@@ -139,40 +193,38 @@ sub copy_file_or_dir {
 
 sub query {
     my ($self, $query) = @_;
-    my $space_id = $self->{space_id} || die "No space id set.";
     my $som = $self->_call('executeQueryInSpace',
             SOAP::Data->name('query')->value($query),
-            SOAP::Data->name('spaceID')->value($space_id),
+            SOAP::Data->name('spaceID')->value($self->space_id),
             );
     require Birst::QueryResult;
-    $self->{query_result} = Birst::QueryResult->new($som);
-    $self->{query_token} = $self->{query_result}->token;
+    $self->_query_result(Birst::QueryResult->new($som));
+    $self->_query_token($self->query_result->token);
     $self;
 }
 
 sub fetch {
     my $self = shift;
-    return unless $self->{query_result};
-    my $result = $self->{query_result};
+    return unless $self->has_query_result;
+    my $result = $self->query_result;
     my $row = $result->fetch;
     if (not ref $row and $result->has_more) {
         my $som = $self->_call('queryMore',
-                SOAP::Data->name('queryToken')->value($self->{query_token}),
+                SOAP::Data->name('queryToken')->value($self->query_token),
                 );
-        $self->{query_result} = Birst::QueryResult->new($som);
-        $row = $self->{query_result}->fetch;
+        $self->_query_result(Birst::QueryResult->new($som));
+        $row = $self->query_result->fetch;
     }
     elsif (not ref $row) {
-        $self->{query_result} = undef;
+        $self->clear_query_result;
     }
     $_ = $row;
 }
 
 sub clear_cache {
     my $self = shift;
-    my $space_id = $self->{space_id} || die "No space id.";
     my $som = $self->_call('clearCacheInSpace',
-                 SOAP::Data->name('spaceID')->value($space_id),
+                 SOAP::Data->name('spaceID')->value($self->space_id),
             );
     my $result = $som->valueof('//clearCacheInSpaceResponse/clearCacheInSpaceResult');
     $result eq 'true';
@@ -180,30 +232,29 @@ sub clear_cache {
 
 sub clear_dashboard_cache {
     my $self = shift;
-    my $space_id = $self->{space_id} || die "No space id.";
     $self->_call('clearDashboardCache',
-                 SOAP::Data->name('spaceID')->value($space_id),
+                 SOAP::Data->name('spaceID')->value($self->space_id),
             );
 }
 
 sub spaces {
     my $self = shift;
     my $som = $self->_call('listSpaces');
-	if (defined $som) {
-		if (ref $som->result->{UserSpace} eq 'ARRAY') {
-			return $_ = $som->result->{UserSpace};
-		}
-		elsif (ref $som->result->{UserSpace} eq 'HASH') {
-			return $_ = [$som->result->{UserSpace}];
-		}
-	}
-	undef;
+    if (defined $som) {
+        if (ref $som->result->{UserSpace} eq 'ARRAY') {
+            return $_ = $som->result->{UserSpace};
+        }
+        elsif (ref $som->result->{UserSpace} eq 'HASH') {
+            return $_ = [$som->result->{UserSpace}];
+        }
+    }
+    undef;
 }
 
 sub _uploadopt {
     my ($self, $arg, $value) = @_;
     my $opt;
-	$_ = $arg;
+    $_ = $arg;
     
     if (/consolidate/) {
         $opt = 'ConsolidateIdenticalStructures';
@@ -240,8 +291,6 @@ sub _uploadopt {
 
 sub upload {
     my ($self, $filename) = (shift, shift);
-    my $space_id = $self->{space_id} || die "No space id set.";
-    
     my %opts = @_;
     my @opts = ();
     for (keys %opts) {
@@ -263,7 +312,7 @@ sub upload {
     }
     
     my $som = $self->_call('beginDataUpload',
-                 SOAP::Data->name('spaceID')->value($space_id),
+                 SOAP::Data->name('spaceID')->value($self->space_id),
                  SOAP::Data->name('sourceName')->value($upload_filename),
             );
     
@@ -293,25 +342,24 @@ sub upload {
                  SOAP::Data->name('dataUploadToken')->value($upload_token),
             );
     
-    $self->{upload_token} = $upload_token;
+    $self->_upload_token($upload_token);
     $self;
 }
 
 sub upload_status {
     my $self = shift;
-    my $upload_token = $self->{upload_token} || die "no upload token";
     my $som = $self->_call('isDataUploadComplete',
-                 SOAP::Data->name('dataUploadToken')->value($upload_token),
+                 SOAP::Data->name('dataUploadToken')->value($self->upload_token),
             );
     my $result = $som->valueof('//isDataUploadCompleteResponse/isDataUploadCompleteResult');
     if ($result eq 'false') {
         return 0;
     }
     $som = $self->_call('getDataUploadStatus',
-                SOAP::Data->name('dataUploadToken')->value($upload_token),
+                SOAP::Data->name('dataUploadToken')->value($self->upload_token),
             );
     # we are done so remove upload token
-    $self->{upload_token} = 0;
+    $self->clear_upload_token;
     $som->result || 1;
 }
 
@@ -323,7 +371,6 @@ sub upload_sync {
 
 sub process_data {
     my $self = shift;
-    my $space_id = $self->{space_id} || die "No space id set.";
     my %opts = @_;
     
     my $date;
@@ -345,31 +392,27 @@ sub process_data {
     }
     
     my $som = $self->_call('publishData',
-                 SOAP::Data->name('spaceID')->value($space_id),
+                 SOAP::Data->name('spaceID')->value($self->space_id),
                  SOAP::Data->name('subgroups')->value(\@subgroups),
                  SOAP::Data->name('date')->value($date),
             );
-    $self->{publish_token} = $som->valueof('//publishDataResponse/publishDataResult');
+    $self->_publish_token($som->valueof('//publishDataResponse/publishDataResult'));
 }
 
 *publish_data = \&process_data;
 
 sub process_data_status {
     my $self = shift;
-    my $publish_token = $self->{publish_token} || die "No publishing token.";
-    
     my $som = $self->_call('isPublishingComplete',
-                 SOAP::Data->name('publishingToken')->value($publish_token),
+                 SOAP::Data->name('publishingToken')->value($self->publish_token),
             );
     my $result = $som->valueof('//isPublishingCompleteResponse/isPublishingCompleteResult');
-    if ($result eq 'false') {
-        return 0;
-    }
+    return 0 if ($result eq 'false');
     $som = $self->_call('getPublishingStatus',
-                SOAP::Data->name('publishingToken')->value($publish_token),
+                SOAP::Data->name('publishingToken')->value($self->publish_token),
             );
     # we are done so clear the publishing token
-    $self->{publish_token} = 0;
+    $self->clear_publish_token;
     $som->result || 1;
 }
 
@@ -385,7 +428,6 @@ sub process_data_sync {
 
 sub create_subject_area {
     my ($self, $name, $description) = (shift, shift, shift);
-    my $space_id = $self->{space_id} || die "No space id.";
     my %opts = @_;
     
     my @groups = ();
@@ -399,7 +441,7 @@ sub create_subject_area {
     }
     
     $self->_call('createSubjectArea',
-            SOAP::Data->name('spaceID')->value($space_id),
+            SOAP::Data->name('spaceID')->value($self->space_id),
             SOAP::Data->name('name')->value($name),
             SOAP::Data->name('description')->value($description),
             SOAP::Data->name('groups')->value(\@groups),
@@ -409,10 +451,8 @@ sub create_subject_area {
 
 sub delete_subject_area {
     my ($self, $name) = @_;
-    my $space_id = $self->{space_id} || die "No space id.";
-    
     $self->_call('deleteSubjectArea',
-            SOAP::Data->name('spaceID')->value($space_id),
+            SOAP::Data->name('spaceID')->value($self->space_id),
             SOAP::Data->name('name')->value($name),
         );
     $self;
@@ -420,13 +460,12 @@ sub delete_subject_area {
 
 sub create_directory {
     my ($self, $dir) = @_;
-    my $space_id = $self->{space_id} || die "No space id.";
     my $directory = path($dir)->basename;
     my $parent = path($dir)->dirname;
     $parent =~ s/\/$//;
     
     my $som = $self->_call('checkAndCreateDirectory',
-                SOAP::Data->name('spaceID')->value($space_id),
+                SOAP::Data->name('spaceID')->value($self->space_id),
                 SOAP::Data->name('parentDir')->value($parent),
                 SOAP::Data->name('newDirectoryName')->value($directory),
             );
@@ -442,64 +481,56 @@ sub releases {
 
 sub get_engine_version {
     my $self = shift;
-    my $space_id = $self->{space_id} || die "No space id.";
     my $som = $self->_call('getSpaceProcessEngineVersion',
-                 SOAP::Data->name('spaceID')->value($space_id),
+                 SOAP::Data->name('spaceID')->value($self->space_id),
             );
     $som->valueof('//getSpaceProcessEngineVersionResponse/getSpaceProcessEngineVersionResult');
 }
 
 sub set_engine_version {
     my ($self, $version) = @_;
-    my $space_id = $self->{space_id} || die "No space id.";
     my $som = $self->_call('setSpaceProcessEngineVersion',
-                SOAP::Data->name('spaceID')->value($space_id),
+                SOAP::Data->name('spaceID')->value($self->space_id),
                 SOAP::Data->name('processingVersionName')->value($version),
             );
 }
 
 sub delete_all_data {
     my $self = shift;
-    my $space_id = $self->{space_id} || die "No space id.";
     my $som = $self->_call('deleteAllDataFromSpace',
-                 SOAP::Data->name('spaceID')->value($space_id),
+                 SOAP::Data->name('spaceID')->value($self->space_id),
             );
-    $self->{job_token} = $som->valueof('//deleteAllDataFromSpaceResponse/deleteAllDataFromSpaceResult');
+    $self->_job_token($som->valueof('//deleteAllDataFromSpaceResponse/deleteAllDataFromSpaceResult'));
 }
 
 sub delete_last_data {
     my $self = shift;
-    my $space_id = $self->{space_id} || die "No space id.";
     my $som = $self->_call('deleteLastDataFromSpace',
-                 SOAP::Data->name('spaceID')->value($space_id),
+                 SOAP::Data->name('spaceID')->value($self->space_id),
             );
-    $self->{job_token} = $som->valueof('//deleteLastDataFromSpaceResponse/deleteLastDataFromSpaceResult');
+    $self->_job_token($som->valueof('//deleteLastDataFromSpaceResponse/deleteLastDataFromSpaceResult'));
 }
 
 sub delete_file_or_dir {
     my ($self, $file) = @_;
-    my $space_id = $self->{space_id} || die "No space id.";
     $self->_call('deleteFileOrDirectory',
-                 SOAP::Data->name('spaceID')->value($space_id),
+                 SOAP::Data->name('spaceID')->value($self->space_id),
                  SOAP::Data->name('fileOrDir')->value($file),
                  );
 }
 
 sub job_status {
     my $self = shift;
-    my $job_token = $self->{job_token} || die "no job token";
     my $som = $self->_call('isJobComplete',
-                 SOAP::Data->name('jobToken')->value($job_token),
+                 SOAP::Data->name('jobToken')->value($self->job_token),
             );
     my $result = $som->valueof('//isJobCompleteResponse/isJobCompleteResult');
-    if ($result eq 'false') {
-        return 0;
-    }
+    return 0 if ($result eq 'false');
     $som = $self->_call('getJobStatus',
-                SOAP::Data->name('jobToken')->value($job_token),
+                SOAP::Data->name('jobToken')->value($self->job_token),
             );
     # we are done, so remove job token
-    $self->{job_token} = 0;
+    $self->clear_job_token;
     $som->result || 1;
 }
 
@@ -531,18 +562,16 @@ sub delete_last_data_sync {
 
 sub sources {
     my $self = shift;
-    my $space_id = $self->{space_id} || die "No space id.";
     my $som = $self->_call('getSourcesList',
-                 SOAP::Data->name('spaceID')->value($space_id),
+                 SOAP::Data->name('spaceID')->value($self->space_id),
             );
     $som->result->{string};    
 }
 
 sub source_details {
     my ($self, $source) = @_;
-    my $space_id = $self->{space_id} || die "No space id.";
     my $som = $self->_call('getSourceDetails',
-                SOAP::Data->name('spaceID')->value($space_id),
+                SOAP::Data->name('spaceID')->value($self->space_id),
                 SOAP::Data->name('sourceName')->value($source),
             );
     $som->result;
@@ -550,7 +579,7 @@ sub source_details {
 
 sub _copyopt {
     my ($self, $arg) = @_;
-	$_ = $arg;
+    $_ = $arg;
     tr/_/-/;
     return 'DrillMaps.xml' if /drill(-|)map/;
     return 'CustomGeoMaps.xml' if /geo(-|)map/;
@@ -594,7 +623,7 @@ sub _copyspace {
                  SOAP::Data->name('mode')->value($copy_type),
                  SOAP::Data->name('options')->value($opts),
             );
-    $self->{job_token} = $som->valueof('//copySpaceResponse/copySpaceResult');
+    $self->_job_token($som->valueof('//copySpaceResponse/copySpaceResult'));
 }
 
 sub copy_space {
@@ -621,11 +650,10 @@ sub replicate_space_sync {
 
 sub delete_space {
     my ($self, $space) = @_;
-    my $space_id = get_space_id_by_name($space);
     my $som = $self->_call('deleteSpace',
-                 SOAP::Data->name('spaceId')->value($space_id),
+                 SOAP::Data->name('spaceId')->value($self->space_id),
             );
-    $self->{job_token} = $som->valueof('//deleteSpaceResponse/deleteSpaceResult');
+    $self->_job_token($som->valueof('//deleteSpaceResponse/deleteSpaceResult'));
 }
 
 sub delete_space_sync {
@@ -642,7 +670,7 @@ sub swap_space_contents {
                            SOAP::Data->name('sp1ID')->value($space_from_id),
                            SOAP::Data->name('sp2ID')->value($space_to_id),
                     );
-    $self->{job_token} = $som->valueof('//swapSpaceContentsResponse/swapSpaceContentsResult');
+    $self->_job_token($som->valueof('//swapSpaceContentsResponse/swapSpaceContentsResult'));
 }
 
 sub swap_space_contents_sync {
@@ -653,11 +681,10 @@ sub swap_space_contents_sync {
 
 sub add_group_acl {
     my ($self, $group, $tag) = @_;
-    my $space_id = $self->{space_id} || die "No space id.";
     $self->_call('addAclToGroupInSpace',
                  SOAP::Data->name('groupName')->value($group),
                  SOAP::Data->name('aclTag')->value($tag),
-                 SOAP::Data->name('spaceID')->value($space_id),
+                 SOAP::Data->name('spaceID')->value($self->space_id),
                  );
 }
 
@@ -679,10 +706,9 @@ sub allow_ip_cidr {
 
 sub add_group {
     my ($self, $group) = @_;
-    my $space_id = $self->{space_id} || die "No space id.";
     $self->_call('addGroupToSpace',
                  SOAP::Data->name('groupName')->value($group),
-                 SOAP::Data->name('spaceID')->value($space_id),
+                 SOAP::Data->name('spaceID')->value($self->space_id),
                  );
 }
 
@@ -717,22 +743,20 @@ sub add_user {
 
 sub add_user_to_group {
     my ($self, $user, $group) = @_;
-    my $space_id = $self->{space_id} || die "No space id.";
     $self->_call('addUserToGroupInSpace',
                  SOAP::Data->name('userName')->value($user),
                  SOAP::Data->name('groupName')->value($group),
-                 SOAP::Data->name('spaceID')->value($space_id),
+                 SOAP::Data->name('spaceID')->value($self->space_id),
                  );
 }
 
 sub add_user_to_space {
     my ($self, $user) = (shift, shift);
-    my $space_id = $self->{space_id} || die "No space id.";
     my %opts = @_;
     my $admin = $opts{admin} == 1 ? 'true' : 'false';
     $self->_call('addUserToSpace',
                  SOAP::Data->name('userName')->value($user),
-                 SOAP::Data->name('spaceID')->value($space_id),
+                 SOAP::Data->name('spaceID')->value($self->space_id),
                  SOAP::Data->name('hasAdmin')->value($admin),
                 );
 }
@@ -802,9 +826,8 @@ sub disable_account {
 
 sub enable_source {
     my ($self, $source) = @_;
-    my $space_id = $self->{space_id} || die "No space id.";
     $self->_call('enableSourceInSpace',
-                 SOAP::Data->name('spaceID')->value($space_id),
+                 SOAP::Data->name('spaceID')->value($self->space_id),
                  SOAP::Data->name('dataSourceName')->value($source),
                  SOAP::Data->name('enabled')->value('true'),
                  );
@@ -812,9 +835,8 @@ sub enable_source {
 
 sub disable_source {
     my ($self, $source) = @_;
-    my $space_id = $self->{space_id} || die "No space id.";
     $self->_call('enableSourceInSpace',
-                 SOAP::Data->name('spaceID')->value($space_id),
+                 SOAP::Data->name('spaceID')->value($self->space_id),
                  SOAP::Data->name('dataSourceName')->value($source),
                  SOAP::Data->name('enabled')->value('false'),
                  );
@@ -838,9 +860,8 @@ sub disable_user {
 
 sub execute_report_schedule {
     my ($self, $report) = @_;
-    my $space_id = $self->{space_id} || die "No space id.";
     $self->_call('executeScheduledReport',
-                 SOAP::Data->name('spaceId')->value($space_id),
+                 SOAP::Data->name('spaceId')->value($self->space_id),
                  SOAP::Data->name('reportScheduleName')->value($report),
                  );
 }
@@ -849,35 +870,34 @@ my @export_types = qw(CSV PDF PNG PPT RTF XLS);
 
 sub export_report {
     my ($self, $report, $type) = (shift, shift, shift);
-    my $space_id = $self->{space_id} || die "No space id.";
     $type = uc $type;
     die "Unknown report type: $type" if none { $type eq $_ } @export_types;
     my %opts = @_;
     my @filters = ();
     if (ref $opts{filters} eq 'ARRAY') {
         for (@{$opts{filters}}) {
-            die "Must be a Birst::Filter obeject." unless ref $_ eq 'Birst::Filter';
+            die "Must be a Birst::Filter obeject." unless reftype $_ eq 'Birst::Filter';
             push @filters, $_->soapify;
         }
     }
     my @params = (
-        SOAP::Data->name('spaceId')->value($space_id),
+        SOAP::Data->name('spaceId')->value($self->space_id),
         SOAP::Data->name('reportPath')->value($report),
     );
     if (@filters) {
         push @params, SOAP::Data->name('reportFilters')->value(\@filters);
     }
     my $som = $self->_call('exportReportTo' . $type, @params);
-    $self->{job_token} = $som->valueof('//exportReportTo' . $type . 'Response/exportReportTo' . $type . 'Result');
+    $self->_job_token($som->valueof('//exportReportTo' . $type . 'Response/exportReportTo' . $type . 'Result'));
 }
 
 sub export_report_sync {
     my ($self, $file) = (shift, shift);
     $self->export_report(@_);
-    $self->{job_token} = $self->{export_token};
+    $self->_job_token($self->export_token);
     $self->_wait_for_status(\&job_status);
     my $som = $self->_call('getExportData',
-                        SOAP::Data->name('exportToken')->value($self->{export_token}),
+                        SOAP::Data->name('exportToken')->value($self->export_token),
                         );
     die "No report data available." if not $som->result;
     open(my $fh, ">:raw", $file) or die "Unable to open file: $!";
@@ -887,9 +907,8 @@ sub export_report_sync {
 
 sub get_dir_contents {
     my ($self, $dir) = @_;
-    my $space_id = $self->{space_id} || die "No space id.";
     my $som = $self->_call('getDirectoryContents',
-                 SOAP::Data->name('spaceID')->value($space_id),
+                 SOAP::Data->name('spaceID')->value($self->space_id),
                  SOAP::Data->name('dir')->value($dir),
                 );
     my $result = $som->result;
@@ -903,9 +922,8 @@ sub get_dir_contents {
 
 sub get_dir_perms {
     my ($self, $dir) = @_;
-    my $space_id = $self->{space_id} || die "No space id.";
     my $som = $self->_call('getDirectoryPermissions',
-                           SOAP::Data->name('spaceID')->value($space_id),
+                           SOAP::Data->name('spaceID')->value($self->space_id),
                            SOAP::Data->name('dir')->value($dir),
                            );
     my $result = $som->result;

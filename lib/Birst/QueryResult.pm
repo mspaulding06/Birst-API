@@ -60,7 +60,6 @@ around BUILDARGS => sub {
     return $class->$orig(som => $_[0]);
 };
 
-
 sub BUILD {
     my $self = shift;
 
