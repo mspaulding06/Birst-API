@@ -3,6 +3,8 @@ use 5.012;
 use strict;
 use warnings FATAL => 'all';
 use Moose;
+use Moose::Util::TypeConstraints;
+use MooseX::Params::Validate;
 use SOAP::Lite;
 use HTTP::Cookies;
 use IO::Compress::Zip qw(zip $ZipError);
@@ -31,6 +33,13 @@ my %wsdl = (
         5.12 => 'https://app2101.bws.birst.com/CommandWebService.asmx?WSDL',
         5.13 => 'https://app2102.bws.birst.com/CommandWebService.asmx?WSDL',
         );
+
+subtype 'Birst::SpaceId',
+    as 'Str',
+    where { $_ =~ /\w{8}-\w{4}-\w{4}-\w{4}-\w{12}/ },
+    message { "Space Id $_ is not a GUID" };
+
+enum 'Birst::CopyType', [qw(copy replicate)];
 
 has 'client' => (
     is => 'ro',
@@ -103,7 +112,7 @@ has 'export_token' => (
 
 has 'space_id' => (
     is => 'rw',
-    isa => 'Str',
+    isa => 'Birst::SpaceId',
     predicate => 'has_space_id',
 );
 
@@ -117,14 +126,14 @@ sub BUILD {
 }
 
 sub _print_fault {
-    my ($self, $message) = @_;
+    my ($self, $message) = pos_validated_list(\@_, message => { isa => 'Str' });
     # Try and make fault messages less cryptic
     die "Logical query syntax is incorrect." if $message =~ /Object reference not set to an instance of an object./;
     die $message;
 }
 
 sub _call {
-    my ($self, $method) = (shift, shift);
+    my ($self, $method) = pos_validated_list(\@_, method => { isa => 'Str' });
     my $som = $self->client->on_action(sub {"${ns}${method}"})
         ->call($method => SOAP::Data->name('token')->value($self->token), @_);
     die $self->_print_fault($som->faultstring) if $som->fault;
@@ -132,12 +141,12 @@ sub _call {
 }
 
 sub set_space_by_name {
-    my ($self, $space_name) = @_;
+    my ($self, $space_name) = pos_validated_list(\@_, space_name => { isa => 'Str' });
     $self->space_id($self->get_space_id_by_name($space_name));
 }
 
 sub get_space_id_by_name {
-    my ($self, $space_name) = @_;
+    my ($self, $space_name) = pos_validated_list(\@_, space_name => { isa => 'Str' });
     # escape parens in space name
     $space_name =~ s/(\(|\))/\\$1/g;
     my $spaces = $self->spaces;
@@ -148,7 +157,10 @@ sub get_space_id_by_name {
 }
 
 sub login {
-    my ($self, $username, $password) = @_;
+    my ($self, $username, $password) = pos_validated_list(\@_,
+        username => { isa => 'Str' },
+        password => { isa => 'Str' },
+    );
     $self->client->on_action(sub { "${ns}Login" });
     my $som = $self->{client}->call("Login",
             SOAP::Data->name('username')->value($username),
@@ -192,7 +204,7 @@ sub copy_file_or_dir {
 }
 
 sub query {
-    my ($self, $query) = @_;
+    my ($self, $query) = pos_validated_list(\@_, query => { isa => 'Str' });
     my $som = $self->_call('executeQueryInSpace',
             SOAP::Data->name('query')->value($query),
             SOAP::Data->name('spaceID')->value($self->space_id),
@@ -290,7 +302,7 @@ sub _uploadopt {
 }
 
 sub upload {
-    my ($self, $filename) = (shift, shift);
+    my ($self, $filename) = pos_validated_list(\@_, filename => { isa => 'Str' });
     my %opts = @_;
     my @opts = ();
     for (keys %opts) {
@@ -613,22 +625,28 @@ sub _buildcopyopts {
 }
 
 sub _copyspace {
-    my ($self, $copy_type, $space_from, $space_to) = (shift, shift, shift, shift);
-    my $space_from_id = $self->get_space_id_by_name($space_from);
-    my $space_to_id = $self->get_space_id_by_name($space_to);
-    my $opts = $self->_buildcopyopts(@_);
-    my $som = $self->_call('copySpace',
-                 SOAP::Data->name('spFromID')->value($space_from_id),
-                 SOAP::Data->name('spToID')->value($space_to_id),
-                 SOAP::Data->name('mode')->value($copy_type),
-                 SOAP::Data->name('options')->value($opts),
-            );
+    my ($self, $from, $to, $type, $opts) = validated_list(
+        \@_,
+        from => { isa => 'Str' },
+        to   => { isa => 'Str' },
+        type => { isa => 'Birst::CopyType' },
+        MX_PARAMS_VALIDATE_ALLOW_EXTRA => 1,
+    );
+    my $from_id = $self->get_space_id_by_name($from);
+    my $to_id   = $self->get_space_id_by_name($to);
+    my $options = $self->_buildcopyopts(@_);
+    my $som     = $self->_call('copySpace',
+                     SOAP::Data->name('spFromID')->value($from_id),
+                     SOAP::Data->name('spToID')->value($to_id),
+                     SOAP::Data->name('mode')->value($type),
+                     SOAP::Data->name('options')->value($options),
+                 );
     $self->_job_token($som->valueof('//copySpaceResponse/copySpaceResult'));
 }
 
 sub copy_space {
     my $self = shift;
-    $self->_copyspace('copy', @_);
+    $self->_copyspace(type => 'copy', @_);
 }
 
 sub copy_space_sync {
