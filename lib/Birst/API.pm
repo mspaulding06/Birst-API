@@ -237,14 +237,14 @@ sub _buildcopyopts {
 }
 
 sub _copyspace {
-    my ($self, $from, $to, $type) = validated_list(
-        [shift, shift, shift, shift],
-        from => { isa => 'Str' },
-        to   => { isa => 'Str' },
-        type => { isa => 'Birst::CopyType' },
+    my $self = shift;
+    my ($type, $from, $to) = pos_validated_list([shift, shift, shift],
+        { isa => 'Birst::CopyType' },
+        { isa => 'Str' },
+        { isa => 'Str' },
     );
-    my $from_id = $self->get_space_id_by_name($from);
-    my $to_id   = $self->get_space_id_by_name($to);
+    my $from_id = $self->get_space_id($from);
+    my $to_id   = $self->get_space_id($to);
     my $options = $self->_buildcopyopts(@_);
     my $som     = $self->_call('copySpace',
         [
@@ -258,7 +258,8 @@ sub _copyspace {
 }
 
 sub copy_space {
-    $_[0]->_copyspace(type => 'copy', @_);
+    my $self = shift;
+    $self->_copyspace('copy', @_);
 }
 
 sub copy_space_sync {
@@ -268,7 +269,8 @@ sub copy_space_sync {
 }
 
 sub replicate_space {
-    $_[0]->_copyspace('replicate', @_);
+    my $self = shift;
+    $self->_copyspace('replicate', @_);
 }
 
 sub replicate_space_sync {
