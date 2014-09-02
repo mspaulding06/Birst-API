@@ -3,6 +3,7 @@ use Moose;
 use Moose::Util::TypeConstraints;
 use SOAP::Lite;
 
+
 enum 'Birst::FilterType'      => [qw(Data Display Set-based)];
 enum 'Birst::MultiselectType' => [qw(OR AND)];
 enum 'Birst::Operation'       => ['>', '<', '>=', '<=', '<>', 'LIKE', 'NOT LIKE', 'IS NULL', 'IS NOT NULL'];
@@ -15,7 +16,6 @@ has 'filter_type' => (
     isa => 'Birst::FilterType',
     required => 1,
     default => 'Data',
-    lazy => 1,
 );
 
 has 'op' => (
@@ -29,7 +29,6 @@ has 'multiselect_type' => (
     isa => 'Birst::MultiselectType',
     required => 1,
     default => 'OR',
-    lazy => 1,
 );
 
 has 'column' => (

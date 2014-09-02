@@ -1,10 +1,10 @@
 package Birst::QueryResult;
-use 5.012;
 use strict;
 use warnings FATAL => 'all';
 use Moose;
 use SOAP::Lite;
 use DateTime;
+
 
 BEGIN {
     require DateTime::Format::Flexible;
@@ -22,7 +22,6 @@ has 'more_rows' => (
     is => 'ro',
     isa => 'Bool',
     writer => '_more_rows',
-    predicate => 'has_more',
 );
 
 has 'columns' => (
@@ -55,16 +54,27 @@ has 'som' => (
     writer => '_som',
 );
 
+has 'client' => (
+    is => 'ro',
+    isa => 'Birst::API',
+    writer => '_client',
+);
+
 around BUILDARGS => sub {
     my ($orig, $class) = (shift, shift);
-    return $class->$orig(som => $_[0]);
+    return $class->$orig(client => $_[0], som => $_[1]);
 };
 
 sub BUILD {
     my $self = shift;
-
     my $raw_result = $self->som->result || return;
+    $self->_parse_soap_response($raw_result);
+}
+
+sub _parse_soap_response {
+    my ($self, $raw_result) = @_;
     my (@types, @columns, @display_names, @rows);
+
     if (ref $raw_result->{dataTypes}->{int} eq 'ARRAY') {
         @types = @{$raw_result->{dataTypes}->{int}};
     }
@@ -93,7 +103,12 @@ sub BUILD {
     }
 
     $self->_row_count($raw_result->{numRowsReturned} || 0);
-    $self->_more_rows($raw_result->{hasMoreRows} eq 'true');
+    if (defined $raw_result->{hasMoreRows}) {
+        $self->_more_rows($raw_result->{hasMoreRows} eq 'true');
+    }
+    else {
+        $self->_more_rows(0);
+    }
     $self->_token($raw_result->{queryToken} || '');
 
 # Do DateTime conversion
@@ -108,14 +123,29 @@ sub BUILD {
     $self->_columns(\@columns);
     $self->_names(\@display_names);
     $self->_rows(\@rows);
-    undef;
 }
 
-sub fetch {
+sub _next_row {
     my $self = shift;
-    return unless scalar @{$self->rows};
+    return unless @{ $self->rows };
     $self->_row_count($self->row_count - 1);
-    shift $self->rows;
+    return (shift @{ $self->rows });
+}
+
+sub fetch_row {
+    my $self = shift;
+    my $row = $self->_next_row;
+    if (not ref $row and $self->more_rows) {
+        my $som = $self->client->_call('queryMore',
+            [ SOAP::Data->name('queryToken')->value($self->token) ],
+        );
+        $self->_parse_soap_response($som);
+        $row = $self->_next_row;
+    }
+    elsif (not ref $row) {
+        return;
+    }
+    return ($_ = $row);
 }
 
 1;
